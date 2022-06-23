@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam"
@@ -15,10 +16,11 @@ import (
 )
 
 type CommentRow struct {
+	Id   int    `bigquery:"id"`
 	Text string `bigquery:"text"`
 }
 
-const query = `SELECT text FROM ` + "`bigquery-public-data.hacker_news.comments`" + `
+const query = `SELECT id, text FROM ` + "`bigquery-public-data.hacker_news.comments`" + `
 WHERE time_ts BETWEEN '2013-01-01' AND '2014-01-01'
 LIMIT 1000`
 
@@ -30,7 +32,15 @@ func init() {
 }
 
 func extractFn(row CommentRow, emit func([]string)) {
-	fmt.Print(row.Text)
+
+	out, err := json.Marshal(row)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(string(out))
+
 	split := strings.Split(row.Text, delimiter)
 	emit(split)
 }
@@ -63,9 +73,9 @@ func main() {
 
 	textio.Write(s, "/tmp/output.csv", formatted)
 
-	if err := beamx.Run(context.Background(), p); err != nil {
+	if err := beamx.Run(ctx, p); err != nil {
 		log.Fatalf("Failed to execute job: %v", err)
 	}
 
-	//bigqueryio.Write(s, project, "", rows)
+	bigqueryio.Write(s, project, "", rows)
 }
