@@ -4,37 +4,45 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"reflect"
-	"strings"
-
 	"github.com/apache/beam/sdks/v2/go/pkg/beam"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/io/bigqueryio"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/io/textio"
-	"github.com/apache/beam/sdks/v2/go/pkg/beam/log"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/options/gcpopts"
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/x/beamx"
+	"log"
+	"reflect"
+	"strings"
 )
 
-type Row struct {
+type CommentRow struct {
 	Text string `bigquery:"text"`
 }
 
-const query = ``
+const query = `SELECT text FROM ` + "`bigquery-public-data.hacker_news.comments`" + `
+WHERE time_ts BETWEEN '2013-01-01' AND '2014-01-01'
+LIMIT 1000`
+
 const delimiter = ";"
 
-func extractFn(line string, delimiter string, emit func([]string)) {
-	split := strings.Split(line, delimiter)
+func init() {
+	beam.RegisterFunction(extractFn)
+	beam.RegisterFunction(formatFn)
+}
+
+func extractFn(row CommentRow, emit func([]string)) {
+	fmt.Print(row.Text)
+	split := strings.Split(row.Text, delimiter)
 	emit(split)
 }
 
-func SplitLines(s beam.Scope, lines beam.PCollection, delimiter string) beam.PCollection {
+func SplitLines(s beam.Scope, lines beam.PCollection) beam.PCollection {
 	s = s.Scope("Split Lines")
 	col := beam.ParDo(s, extractFn, lines)
 	return col
 }
 
-func formatFn(w string) string {
-	return fmt.Sprintf("%s", w)
+func formatFn(w []string) string {
+	return fmt.Sprintf("%s", strings.Join(w, delimiter))
 }
 
 func main() {
@@ -47,17 +55,17 @@ func main() {
 	s := p.Root()
 	project := gcpopts.GetProject(ctx)
 
-	if err := beamx.Run(ctx, p); err != nil {
-		log.Exitf(ctx, "Failed to execute job: %v", err)
-	}
-
 	rows := bigqueryio.Query(s, project, query,
-		reflect.TypeOf(Row{}), bigqueryio.UseStandardSQL())
+		reflect.TypeOf(CommentRow{}), bigqueryio.UseStandardSQL())
 
-	lines := SplitLines(s, rows, delimiter)
+	lines := SplitLines(s, rows)
 	formatted := beam.ParDo(s, formatFn, lines)
 
 	textio.Write(s, "/tmp/output.csv", formatted)
 
-	bigqueryio.Write(s, project, "", rows)
+	if err := beamx.Run(context.Background(), p); err != nil {
+		log.Fatalf("Failed to execute job: %v", err)
+	}
+
+	//bigqueryio.Write(s, project, "", rows)
 }
