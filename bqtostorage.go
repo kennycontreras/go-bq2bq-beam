@@ -12,47 +12,45 @@ import (
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/x/beamx"
 	"log"
 	"reflect"
-	"strings"
+	"time"
 )
 
-type CommentRow struct {
-	Id   int    `bigquery:"id"`
-	Text string `bigquery:"text"`
+func init() {
+	beam.RegisterType(reflect.TypeOf((*CommentRow)(nil)))
 }
 
-const query = `SELECT id, text FROM ` + "`bigquery-public-data.hacker_news.comments`" + `
+var (
+	output = flag.String("output", "", "Output file (required)")
+)
+
+const query = `SELECT ` + "`by`" + `, author, time_ts, text FROM ` + "`bigquery-public-data.hacker_news.comments`" + `
 WHERE time_ts BETWEEN '2013-01-01' AND '2014-01-01'
 LIMIT 1000`
 
 const delimiter = ";"
 
-func init() {
-	beam.RegisterFunction(extractFn)
-	beam.RegisterFunction(formatFn)
+type CommentRow struct {
+	By     string    `bigquery:"by"`
+	Author string    `bigquery:"author"`
+	TimeTs time.Time `bigquery:"time_ts"`
+	Text   string    `bigquery:"text"`
 }
 
-func extractFn(row CommentRow, emit func([]string)) {
-
-	out, err := json.Marshal(row)
+func (f *CommentRow) ProcessElement(ctx context.Context, line CommentRow, emit func(string)) {
+	out, err := json.Marshal(line)
 
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println(string(out))
-
-	split := strings.Split(row.Text, delimiter)
-	emit(split)
+	emit(string(out))
 }
 
-func SplitLines(s beam.Scope, lines beam.PCollection) beam.PCollection {
-	s = s.Scope("Split Lines")
-	col := beam.ParDo(s, extractFn, lines)
+func ParseLines(s beam.Scope, lines beam.PCollection) beam.PCollection {
+	s = s.Scope("Parse Lines")
+	col := beam.ParDo(s, &CommentRow{}, lines)
 	return col
-}
-
-func formatFn(w []string) string {
-	return fmt.Sprintf("%s", strings.Join(w, delimiter))
 }
 
 func main() {
@@ -60,22 +58,23 @@ func main() {
 	flag.Parse()
 	beam.Init()
 
+	if *output == "" {
+		log.Fatal("Output filename required")
+	}
+
 	ctx := context.Background()
 	p := beam.NewPipeline()
 	s := p.Root()
 	project := gcpopts.GetProject(ctx)
 
-	rows := bigqueryio.Query(s, project, query,
-		reflect.TypeOf(CommentRow{}), bigqueryio.UseStandardSQL())
+	rows := bigqueryio.Query(s, project, query, reflect.TypeOf(CommentRow{}), bigqueryio.UseStandardSQL())
 
-	lines := SplitLines(s, rows)
-	formatted := beam.ParDo(s, formatFn, lines)
+	lines := ParseLines(s, rows)
 
-	textio.Write(s, "/tmp/output.csv", formatted)
+	textio.Write(s, *output, lines)
 
 	if err := beamx.Run(ctx, p); err != nil {
 		log.Fatalf("Failed to execute job: %v", err)
 	}
 
-	bigqueryio.Write(s, project, "", rows)
 }
