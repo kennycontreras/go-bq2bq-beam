@@ -17,10 +17,12 @@ import (
 
 func init() {
 	beam.RegisterType(reflect.TypeOf((*CommentRow)(nil)))
+	beam.RegisterFunction(transformCsvFN)
 }
 
 var (
-	output = flag.String("output", "", "Output file (required)")
+	output    = flag.String("output", "", "Output file (required)")
+	extension = flag.String("extension", "", "Extension for output file (required)")
 )
 
 const query = `SELECT ` + "`by`" + `, author, time_ts, text FROM ` + "`bigquery-public-data.hacker_news.comments`" + `
@@ -36,7 +38,7 @@ type CommentRow struct {
 	Text   string    `bigquery:"text"`
 }
 
-func (f *CommentRow) ProcessElement(ctx context.Context, line CommentRow, emit func(string)) {
+func (f *CommentRow) ProcessElement(_ context.Context, line CommentRow, emit func(string)) {
 	out, err := json.Marshal(line)
 
 	if err != nil {
@@ -45,6 +47,19 @@ func (f *CommentRow) ProcessElement(ctx context.Context, line CommentRow, emit f
 
 	fmt.Println(string(out))
 	emit(string(out))
+}
+
+func Contains[T comparable](s []T, e T) bool {
+	for _, v := range s {
+		if v == e {
+			return true
+		}
+	}
+	return false
+}
+
+func transformCsvFN(line string) string {
+	return ""
 }
 
 func ParseLines(s beam.Scope, lines beam.PCollection) beam.PCollection {
@@ -62,6 +77,12 @@ func main() {
 		log.Fatal("Output filename required")
 	}
 
+	extensions := []string{"avro", "csv", "parquet", "json"}
+
+	if Contains(extensions, *extension) == false {
+		log.Fatal("Extension not available")
+	}
+
 	ctx := context.Background()
 	p := beam.NewPipeline()
 	s := p.Root()
@@ -71,7 +92,16 @@ func main() {
 
 	lines := ParseLines(s, rows)
 
-	textio.Write(s, *output, lines)
+	switch *extension {
+	case "csv":
+		fmt.Println("")
+	case "json":
+		textio.Write(s, *output, lines)
+	case "avro":
+		fmt.Println("")
+	case "parquet":
+		fmt.Println("")
+	}
 
 	if err := beamx.Run(ctx, p); err != nil {
 		log.Fatalf("Failed to execute job: %v", err)
