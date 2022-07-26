@@ -12,6 +12,7 @@ import (
 	"github.com/apache/beam/sdks/v2/go/pkg/beam/x/beamx"
 	"log"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -29,7 +30,7 @@ const query = `SELECT ` + "`by`" + `, author, time_ts, text FROM ` + "`bigquery-
 WHERE time_ts BETWEEN '2013-01-01' AND '2014-01-01'
 LIMIT 1000`
 
-const delimiter = ";"
+const delimiter = "|"
 
 type CommentRow struct {
 	By     string    `bigquery:"by"`
@@ -58,14 +59,21 @@ func Contains[T comparable](s []T, e T) bool {
 	return false
 }
 
-// TODO: Add functionality to write to different formats like CSV
-func transformCsvFN(line string) string {
-	return ""
+func transformCsvFN(line interface{}) string {
+	dataValue := reflect.ValueOf(line)
+	dataArray := make([]string, dataValue.NumField())
+
+	for i := 0; i < dataValue.NumField(); i++ {
+		dataArray[i] = dataValue.Field(i).String()
+	}
+
+	return strings.Join(dataArray, delimiter)
 }
 
 func ParseLines(s beam.Scope, lines beam.PCollection) beam.PCollection {
 	s = s.Scope("Parse Lines")
-	col := beam.ParDo(s, &CommentRow{}, lines)
+	//col := beam.ParDo(s, &CommentRow{}, lines)
+	col := beam.ParDo(s, transformCsvFN, lines)
 	return col
 }
 
